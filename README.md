@@ -1,11 +1,19 @@
 # Scrape FBref Data - Brazilian Teams
 
-Pacote Python para fazer scraping de dados de times e jogadores brasileiros do FBref.com
+Este pacote Python realiza o web scraping automatizado de estatísticas avançadas de times e jogadores de competições brasileiras (e internacionais com participação brasileira) diretamente do [FBref.com](https://fbref.com).
+
+O projeto foi projetado para ser resiliente, performático e integra-se diretamente com o **SQL Server** para armazenamento de séries temporais.
 
 ## Instalação
 
-1. Clone ou extraia este repositório
-2. Instale as dependências:
+### 1. Requisitos de Sistema
+- **Python 3.8+**
+- **Google Chrome** ou **Chromium** instalado.
+- **Microsoft ODBC Driver 17 for SQL Server** (necessário para persistência no banco).
+
+### 2. Configuração do Ambiente
+
+Clone o repositório e instale as dependências:
 
 ```bash
 pip install -r requirements.txt
