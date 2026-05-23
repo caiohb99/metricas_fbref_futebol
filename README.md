@@ -1,19 +1,20 @@
 # Scrape FBref Data - Brazilian Teams
 
-Este pacote realiza o web scraping automatizado de estatísticas avançadas do [FBref.com](https://fbref.com). O foco principal são competições brasileiras, com suporte a persistência automática em **SQL Server** e extração de dados históricos.
+Este pacote realiza o web scraping automatizado de estatísticas avançadas (Shooting, Passing, Defense, etc.) do [FBref.com](https://fbref.com). Ele foi projetado para analistas de desempenho e entusiastas de dados que precisam de estatísticas de ligas brasileiras e competições da CONMEBOL integradas em um banco de dados **SQL Server**.
 
-## 🚀 Novidades da Versão Atual
-- **Integração SQL Server**: Inserção automática via `SQLAlchemy` com `fast_executemany` (alta performance).
-- **Suporte Histórico**: Agora é possível passar o ano da temporada para baixar dados de anos anteriores.
-- **Metadados de Auditoria**: Cada linha inserida contém `scraped_at`, `data_execucao` e `ano_competicao`.
-- **Resiliência**: O scraper detecta bloqueios e solicita intervenção humana (CAPTCHA) se necessário.
+## 🚀 Funcionalidades Principais
+- **Persistência em SQL Server**: Utiliza `SQLAlchemy` com `fast_executemany` para inserção de alta performance.
+- **Suporte a Dados Históricos**: Permite extrair dados de temporadas anteriores (ex: 2022, 2023) através do parâmetro `--year`.
+- **Controle de Ligas Ativas**: Dicionário centralizado no código para ativar/desativar competições específicas no processamento em lote.
+- **Resiliência a Bloqueios**: Implementação com `undetected-chromedriver` e sistema de pausa inteligente para resolução manual de CAPTCHAs.
+- **Auditoria de Dados**: Colunas automáticas `scraped_at`, `data_execucao` e `ano_competicao` em todas as tabelas.
 
-## Instalação
+## 📋 Requisitos e Instalação
 
 ### 1. Requisitos de Sistema
 - **Python 3.8+**
-- **Google Chrome** instalado (o `undetected-chromedriver` usará sua instalação local).
-- **Microsoft ODBC Driver 17 para SQL Server** (necessário para o banco de dados).
+- **Google Chrome** atualizado.
+- **Microsoft ODBC Driver 17 for SQL Server** (para persistência no banco).
 
 ### 2. Configuração do Ambiente
 ```bash
@@ -72,7 +73,6 @@ python cli.py --top "https://fbref.com/en/comps/9/" --end "/Premier-League-Stats
 
 - `serie-a` - Série A
 - `serie-b` - Série B  
-- `copa-do-brasil` - Copa do Brasil
 - `libertadores` - Copa Libertadores
 - `sul-americana` - Copa Sul-Americana
 
@@ -111,11 +111,13 @@ Se o Selenium não encontrar o ChromeDriver, instale o chromedriver:
 pip install chromedriver-binary
 ```
 
-### Out of memory
-Se tiver problemas de memória, faça scraping de um campeonato por vez:
+### Erro de "Nome de coluna inválido" no SQL Server
+Isso acontece quando você atualiza o script e ele tenta enviar novas colunas para uma tabela antiga no banco. 
+Para resolver, rode o script uma vez com o comando `--reset`:
 ```bash
-python scrape_brazilian_leagues.py --league serie-a
+python main.py --reset
 ```
+**Atenção:** Isso apagará os dados atuais das tabelas para recriá-las com a estrutura correta.
 
 ## Dados Cortesia
 

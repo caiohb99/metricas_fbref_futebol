@@ -6,6 +6,7 @@ import os
 import pandas as pd
 import sqlalchemy as sa
 import argparse
+from pathlib import Path
 from datetime import datetime
 from scrape_fbref import scraper
 import urllib
@@ -15,27 +16,26 @@ BRAZILIAN_LEAGUES = {
     "serie-a": {
         "top": "https://fbref.com/en/comps/24",
         "end": "Serie-A-Stats",
-        "name": "Série A"
+        "name": "Série A",
+        "active": True
     },
     "serie-b": {
         "top": "https://fbref.com/en/comps/38",
         "end": "Serie-B-Stats",
-        "name": "Série B"
-    },
-    "copa-do-brasil": {
-        "top": "https://fbref.com/en/comps/273",
-        "end": "Copa-do-Brasil-Stats",
-        "name": "Copa do Brasil"
+        "name": "Série B",
+        "active": True
     },
     "libertadores": {
         "top": "https://fbref.com/en/comps/14",
         "end": "Copa-Libertadores-Stats",
-        "name": "Copa Libertadores"
+        "name": "Copa Libertadores",
+        "active": True
     },
     "sul-americana": {
-        "top": "https://fbref.com/en/comps/32",
-        "end": "Copa-Sudamericana-Stats",
-        "name": "Copa Sul-Americana"
+        "top": "https://fbref.com/en/comps/205",
+        "end": "CONMEBOL-Sudamericana-Stats",
+        "name": "Copa Sul-Americana",
+        "active": True
     }
 }
 
@@ -77,6 +77,8 @@ def get_sql_types(df):
             dtypes[col] = sa.types.Date()
         elif 'ano_competicao' in col:
             dtypes[col] = sa.types.Integer()
+        elif col == 'league':
+            dtypes[col] = sa.types.NVARCHAR(length=255)
         # O Pandas/SQLAlchemy já mapeia float64 e int64 para FLOAT e INT corretamente
     return dtypes
 
@@ -107,12 +109,12 @@ def scrape_league(league_key: str, year: int = None, mode: str = "all", engine=N
     # Ajusta URLs para competições passadas
     if year:
         # Formato histórico: .../comps/ID/2023/2023-Serie-A-Stats
-        top = f"{base_top}/{year}/"
-        end = f"/{year}-{base_end}"
+        top = f"{base_top.rstrip('/')}/{year}/"
+        end = f"{year}-{base_end}"
     else:
         # Formato atual: .../comps/ID/Serie-A-Stats
-        top = f"{base_top}/"
-        end = f"/{base_end}"
+        top = f"{base_top.rstrip('/')}/"
+        end = f"{base_end}"
     
     print(f"\n{'='*60}")
     print(f"Scraping: {league_name}")
@@ -129,7 +131,8 @@ def scrape_league(league_key: str, year: int = None, mode: str = "all", engine=N
             df['scraped_at'] = scraped_at
             
             if engine:
-                print(f"    → [SQL] Inserindo players_outfield ({league_key})...")
+                col_count = len(df.columns)
+                print(f"    → [SQL] Enviando {col_count} colunas para players_outfield ({league_key})...")
                 # Garante que não existam colunas duplicadas ou sufixos bizarros
                 df = df.loc[:, ~df.columns.duplicated()]
                 df.to_sql('players_outfield', engine, if_exists='append', index=False, dtype=get_sql_types(df))
@@ -145,7 +148,8 @@ def scrape_league(league_key: str, year: int = None, mode: str = "all", engine=N
             df['scraped_at'] = scraped_at
             
             if engine:
-                print(f"    → [SQL] Inserindo players_keepers ({league_key})...")
+                col_count = len(df.columns)
+                print(f"    → [SQL] Enviando {col_count} colunas para players_keepers ({league_key})...")
                 df = df.loc[:, ~df.columns.duplicated()]
                 df.to_sql('players_keepers', engine, if_exists='append', index=False, dtype=get_sql_types(df))
             
@@ -184,11 +188,28 @@ def scrape_league(league_key: str, year: int = None, mode: str = "all", engine=N
     except Exception as e:
         print(f"  ✗ Erro: {e}")
         return {}
-def run_pipeline(league_to_run=None, year=None, mode="all", to_db=False):
+def run_pipeline(league_to_run=None, year=None, mode="all", to_db=False, reset_db=False):
     """Executa o pipeline, consolida e opcionalmente persiste no banco."""
-    leagues = [league_to_run] if league_to_run else BRAZILIAN_LEAGUES.keys()
+    if league_to_run:
+        leagues = [league_to_run]
+    else:
+        # Agora filtramos apenas as ligas que estão com "active": True
+        leagues = [k for k, v in BRAZILIAN_LEAGUES.items() if v.get('active', True)]
+        print(f"Ligas ativas detectadas: {', '.join(leagues)}")
     
     engine = setup_db() if to_db else None
+
+    if reset_db and engine:
+        print("⚠ Resetando tabelas do banco de dados...")
+        tables = ['players_outfield', 'players_keepers', 'teams_stats_for', 'teams_stats_vs']
+        with engine.begin() as conn:  # begin() já lida com o commit automaticamente
+            for table in tables:
+                try:
+                    # DROP TABLE IF EXISTS é suportado no SQL Server 2016+
+                    conn.execute(sa.text(f"DROP TABLE IF EXISTS {table}"))
+                    print(f"    → Tabela {table} removida.")
+                except Exception as e:
+                    print(f"    → Erro ao remover {table}: {e}")
 
     for l_key in leagues:
         scrape_league(l_key, year=year, mode=mode, engine=engine)
@@ -218,6 +239,7 @@ if __name__ == "__main__":
                         default='all', help='Define qual tipo de dado baixar.')
     parser.add_argument('--db', action='store_true', default=True, help='Persistir dados no SQL Server (Padrão: True)')
     parser.add_argument('--no-db', action='store_false', dest='db', help='Desabilita a persistência no banco de dados')
+    parser.add_argument('--reset', action='store_true', help='Apaga as tabelas antes de começar para atualizar o esquema.')
     parser.add_argument('--list', action='store_true', help='Lista os campeonatos configurados e sai.')
 
     args = parser.parse_args()
@@ -226,4 +248,4 @@ if __name__ == "__main__":
         print("\nCampeonatos disponíveis:")
         for k, v in BRAZILIAN_LEAGUES.items(): print(f" - {k}: {v['name']}")
     else:
-        run_pipeline(league_to_run=args.league, year=args.year, mode=args.mode, to_db=args.db)
+        run_pipeline(league_to_run=args.league, year=args.year, mode=args.mode, to_db=args.db, reset_db=args.reset)

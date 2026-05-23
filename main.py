@@ -34,6 +34,11 @@ def main():
         default=True,
         help="Habilita persistência no SQL Server local (Banco: futebol)"
     )
+    parser.add_argument(
+        '--reset',
+        action='store_true',
+        help="Recria as tabelas do zero (resolve erros de 'coluna inválida')"
+    )
     
     args = parser.parse_args()
     
@@ -44,7 +49,7 @@ def main():
         return
 
     # Inicia o pipeline de dados
-    run_pipeline(league_to_run=args.league, year=args.year, mode=args.mode, to_db=args.db)
+    run_pipeline(league_to_run=args.league, year=args.year, mode=args.mode, to_db=args.db, reset_db=args.reset)
     
     print("\n" + "="*60)
     print("✓ PIPELINE DE DADOS CONCLUÍDO!")

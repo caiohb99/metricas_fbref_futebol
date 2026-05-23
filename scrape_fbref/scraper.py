@@ -60,7 +60,19 @@ def _to_number(text: str):
     if text is None or text == '':
         return 0.0
     try:
-        return float(text.replace(',',''))
+        # Remove símbolos de porcentagem e espaços
+        clean_val = text.replace('%', '').strip()
+        if clean_val in ['', '-', 'None']:
+            return 0.0
+        
+        # Trata vírgula como decimal (comum em acessos vindos do Brasil)
+        if ',' in clean_val and '.' not in clean_val:
+            clean_val = clean_val.replace(',', '.')
+        # Se tiver ambos, a vírgula é milhar (padrão US/FBref Global)
+        elif ',' in clean_val and '.' in clean_val:
+            clean_val = clean_val.replace(',', '')
+            
+        return float(clean_val)
     except ValueError:
         return 0.0
 
@@ -119,32 +131,54 @@ def get_tables(url: str, text: str, driver=None) -> Tuple[BeautifulSoup, Beautif
         soup = BeautifulSoup(comm.sub('', html), 'lxml')
         all_tables = soup.find_all('tbody')
 
+    # Extrai a categoria da URL para buscar a tabela específica (ex: 'passing', 'shooting')
+    url_parts = url.split('/')
+    category = "standard"  # Default
+    for part in ["passing", "shooting", "defense", "keepers", "possession", "misc", "passing_types", "gca", "keepersadv"]:
+        if part in url_parts:
+            category = part
+            break
+    if "stats" in url_parts and category == "standard":
+        category = "standard"
+
     # Estratégia de localização de tabelas mais robusta
     player_table = None
     team_table = None
     team_vs_table = None
 
     # 1. Tenta por IDs conhecidos que variam por categoria
-    # Procura tabelas que contenham 'squads' ou 'team' no ID
-    t_for = soup.find('table', id=lambda x: x and 'squads' in x and 'for' in x)
+    # Procura tabelas que contenham 'squads' ou 'team' no ID de forma flexível
+    t_for = soup.find('table', id=lambda x: x and ('squads' in x or 'stats_team' in x) and 'for' in x)
     if not t_for:
-        t_for = soup.find('table', id=lambda x: x and 'stats_team' in x and 'for' in x)
+        t_for = soup.find('table', id=lambda x: x and 'stats_standard' in x and 'for' in x)
         
     if t_for: team_table = t_for.find('tbody')
     
-    t_vs = soup.find('table', id=lambda x: x and 'squads' in x and ('against' in x or 'vs' in x))
+    t_vs = soup.find('table', id=lambda x: x and ('squads' in x or 'stats_team' in x) and ('against' in x or 'vs' in x))
     if not t_vs:
-        t_vs = soup.find('table', id=lambda x: x and 'stats_team' in x and ('against' in x or 'vs' in x))
+        t_vs = soup.find('table', id=lambda x: x and 'stats_standard' in x and ('against' in x or 'vs' in x))
         
     if t_vs: team_vs_table = t_vs.find('tbody')
 
-    # 2. Busca tabela de jogadores (procurando pela coluna 'player' no cabeçalho)
-    stat_tables = soup.find_all('table', class_='stats_table')
-    for table in stat_tables:
-        header = table.find('thead')
-        if header and header.find(['th', 'td'], {"data-stat": ["player", "player_name"]}):
-            player_table = table.find('tbody')
-            break
+    # 2. Busca tabela de jogadores (Prioridade para a tabela consolidada 'combined' em Copas)
+    # Primeiro, tentamos encontrar tabelas que correspondam à categoria
+    potential_tables = soup.find_all('table', id=lambda x: x and f"stats_{category}" in x)
+    
+    # Se for uma Copa, a tabela 'combined' contém todos os jogadores do torneio
+    combined_table = next((t for t in potential_tables if t.get('id') and 'combined' in t.get('id')), None)
+    
+    if combined_table:
+        player_table = combined_table.find('tbody')
+    else:
+        # Fallback: procura a primeira tabela que tenha a coluna 'player'
+        if not potential_tables:
+            potential_tables = soup.find_all('table', class_='stats_table')
+            
+        for table in potential_tables:
+            header = table.find('thead')
+            if header and header.find(['th', 'td'], {"data-stat": ["player", "player_name"]}):
+                player_table = table.find('tbody')
+                break
 
     # 3. Fallbacks finais se a busca estruturada falhar
     if not team_table and all_tables:
@@ -240,14 +274,23 @@ def get_frame_team(features: List[str], team_table) -> pd.DataFrame:
     return pd.DataFrame(pre_df)
 
 def frame_for_category(category: str, top: str, end: str, features: List[str], driver=None) -> pd.DataFrame:
-    url = top + category + end
+    # Garante que a URL não tenha barras duplas acidentais e contenha a categoria
+    base_url = top.rstrip('/')
+    cat = category.strip('/')
+    suffix = end.lstrip('/')
+    url = f"{base_url}/{cat}/{suffix}"
+    
     player_table, _ = get_tables(url, 'for', driver=driver)
     if player_table is None:
         return pd.DataFrame()
     return get_frame(features, player_table)
 
 def frame_for_category_team(category: str, top: str, end: str, features: List[str], text: str, driver=None) -> pd.DataFrame:
-    url = top + category + end
+    base_url = top.rstrip('/')
+    cat = category.strip('/')
+    suffix = end.lstrip('/')
+    url = f"{base_url}/{cat}/{suffix}"
+    
     player_table, team_table = get_tables(url, text, driver=driver)
     if team_table is None:
         return pd.DataFrame()
@@ -255,21 +298,26 @@ def frame_for_category_team(category: str, top: str, end: str, features: List[st
 
 def _merge_dataframes(dfs: List[pd.DataFrame]) -> pd.DataFrame:
     """Une múltiplos DataFrames garantindo que os jogadores estejam alinhados."""
-    if not dfs:
+    # Filtra DataFrames vazios
+    valid_dfs = [df for df in dfs if not df.empty]
+    if not valid_dfs:
         return pd.DataFrame()
     
-    # Colunas usadas como chave para o merge
-    keys = ['player', 'nationality', 'position', 'team', 'age', 'birth_year']
+    # Chaves simplificadas para evitar erros de merge por formatação de idade ou nacionalidade
+    keys = ['player', 'team']
     
-    final_df = dfs[0]
-    for i in range(1, len(dfs)):
+    final_df = valid_dfs[0]
+    for i in range(1, len(valid_dfs)):
         # Verifica quais chaves estão presentes em ambos
-        common_keys = [k for k in keys if k in final_df.columns and k in dfs[i].columns]
+        common_keys = [k for k in keys if k in final_df.columns and k in valid_dfs[i].columns]
         
         # Remove colunas duplicadas do DataFrame da direita antes do merge (exceto as chaves)
-        cols_to_use = dfs[i].columns.difference(final_df.columns.difference(common_keys))
+        # Também remove colunas de metadados que podem conflitar (age, position, nationality)
+        metadata_cols = ['nationality', 'position', 'age', 'birth_year']
+        cols_to_exclude = final_df.columns.difference(common_keys).tolist() + metadata_cols
+        cols_to_use = valid_dfs[i].columns.difference([c for c in cols_to_exclude if c in valid_dfs[i].columns and c not in common_keys])
         
-        final_df = pd.merge(final_df, dfs[i][cols_to_use], on=common_keys, how='outer')
+        final_df = pd.merge(final_df, valid_dfs[i][cols_to_use], on=common_keys, how='outer')
     
     return final_df.fillna(0)
 
