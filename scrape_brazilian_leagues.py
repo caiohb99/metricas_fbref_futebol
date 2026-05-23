@@ -5,6 +5,7 @@ Define URLs de campeonatos brasileiros e permite scraping em lote.
 import os
 import pandas as pd
 import sqlalchemy as sa
+import argparse
 from datetime import datetime
 from scrape_fbref import scraper
 import urllib
@@ -207,3 +208,22 @@ def _consolidate_results(master_dfs, to_db):
         final_df.to_csv(csv_file, index=False)
         final_df.to_parquet(parquet_file, index=False)
         print(f"✓ {table_name} consolidado: CSV e Parquet")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Pipeline de Scraping FBref - Futebol Brasileiro')
+    parser.add_argument('--league', type=str, choices=list(BRAZILIAN_LEAGUES.keys()), 
+                        help='Especifica um campeonato (ex: serie-a). Se omitido, roda todos.')
+    parser.add_argument('--year', type=int, help='Ano da temporada (ex: 2023). Se omitido, usa o ano atual.')
+    parser.add_argument('--mode', type=str, choices=['all', 'outfield', 'keepers', 'team-for', 'team-vs'], 
+                        default='all', help='Define qual tipo de dado baixar.')
+    parser.add_argument('--db', action='store_true', default=True, help='Persistir dados no SQL Server (Padrão: True)')
+    parser.add_argument('--no-db', action='store_false', dest='db', help='Desabilita a persistência no banco de dados')
+    parser.add_argument('--list', action='store_true', help='Lista os campeonatos configurados e sai.')
+
+    args = parser.parse_args()
+
+    if args.list:
+        print("\nCampeonatos disponíveis:")
+        for k, v in BRAZILIAN_LEAGUES.items(): print(f" - {k}: {v['name']}")
+    else:
+        run_pipeline(league_to_run=args.league, year=args.year, mode=args.mode, to_db=args.db)
