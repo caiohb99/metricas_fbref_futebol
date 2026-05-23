@@ -167,7 +167,7 @@ def get_tables(url: str, text: str, driver=None) -> Tuple[BeautifulSoup, Beautif
     # Se for uma Copa, a tabela 'combined' contém todos os jogadores do torneio
     combined_table = next((t for t in potential_tables if t.get('id') and 'combined' in t.get('id')), None)
     
-    if combined_table:
+    if combined_table: 
         player_table = combined_table.find('tbody')
     else:
         # Fallback: procura a primeira tabela que tenha a coluna 'player'
